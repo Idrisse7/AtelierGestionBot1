@@ -7,183 +7,92 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
 <style>
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#111827;color:#fff;margin:0;padding:18px}
-.box{max-width:520px;margin:auto}
-h1{font-size:24px}
-label{display:block;margin:16px 0 7px}
-input,button{width:100%;box-sizing:border-box;border:0;border-radius:14px;padding:15px;font-size:17px}
-input{background:#263244;color:#fff}
-button{margin-top:12px;background:#2ea6ff;color:#fff;font-weight:700}
-button.secondary{background:#374151}
-#reader{margin-top:18px;border-radius:16px;overflow:hidden;background:#000;min-height:280px;display:flex;align-items:center;justify-content:center}
-#reader video{width:100%;height:auto;max-height:520px;display:block;object-fit:cover}
-#status{margin-top:14px;padding:12px;border-radius:12px;background:#1f2937}
-.ok{background:#064e3b!important}.err{background:#7f1d1d!important}
-small{opacity:.75}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#111827;color:#fff;margin:0;padding:18px}.box{max-width:520px;margin:auto}h1{font-size:24px}label{display:block;margin:16px 0 7px}input,button{width:100%;box-sizing:border-box;border:0;border-radius:14px;padding:15px;font-size:17px}input{background:#263244;color:#fff}button{margin-top:12px;background:#2ea6ff;color:#fff;font-weight:700}button.secondary{background:#374151}#reader{margin-top:18px;border-radius:16px;overflow:hidden;background:#000;min-height:280px}#status{margin-top:14px;padding:12px;border-radius:12px;background:#1f2937}.ok{background:#064e3b!important}.err{background:#7f1d1d!important}small{opacity:.75}.context{background:#1f2937;border-radius:12px;padding:12px;margin-top:14px}
 </style>
 </head>
 <body>
 <div class="box">
-<h1>📷 Scanner appareil</h1>
+<h1>📷 Scanner</h1>
 <small>La caméra de ton téléphone est utilisée directement dans Telegram.</small>
-
+<div id="context" class="context" hidden></div>
+<div id="stockRef">
 <label for="ref">Référence stock</label>
 <input id="ref" placeholder="Ex. IP15PRO-BLK-256" autocomplete="off">
-
-<button id="start">📷 Démarrer la caméra</button>
-
-<div id="reader">
-  <video id="camera" playsinline autoplay muted></video>
 </div>
-
+<button id="start">📷 Démarrer la caméra</button>
+<div id="reader"></div>
 <div id="status">Prêt à scanner.</div>
 <button id="stop" class="secondary">⏹ Arrêter</button>
 </div>
-
 <script>
-const tg = window.Telegram?.WebApp;
-if (tg) { tg.ready(); tg.expand(); }
-
-let stream = null;
-let reader = null;
-let controls = null;
-let locked = false;
-
-const status = document.getElementById('status');
-const video = document.getElementById('camera');
-
-function setStatus(t, c='') {
-  status.textContent = t;
-  status.className = c;
-}
-
-function send(value, type) {
-  if (locked) return;
-
-  const reference = document.getElementById('ref').value.trim();
-  if (!reference) {
-    setStatus('❌ Entre la référence stock avant de scanner.', 'err');
-    return;
-  }
-
-  locked = true;
-  stop(false);
-  setStatus('✅ Code détecté : ' + value, 'ok');
-
-  if (tg && tg.sendData) {
-    tg.sendData(JSON.stringify({reference, value, type}));
-    setTimeout(() => tg.close(), 350);
-  } else {
-    setStatus('⚠️ Ouvre cette page depuis le bot Telegram.', 'err');
-    locked = false;
-  }
-}
-
-async function start() {
-  const ref = document.getElementById('ref').value.trim();
-
-  if (!ref) {
-    setStatus('❌ Entre d’abord la référence stock.', 'err');
-    return;
-  }
-
-  if (!window.isSecureContext) {
-    setStatus('❌ Cette page doit être ouverte en HTTPS.', 'err');
-    return;
-  }
-
-  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-    setStatus('❌ Ton navigateur ne permet pas l’accès caméra ici.', 'err');
-    return;
-  }
-
-  if (!window.ZXingBrowser) {
-    setStatus('❌ Lecteur caméra indisponible.', 'err');
-    return;
-  }
-
-  stop(false);
-  locked = false;
-  setStatus('📷 Demande d’accès à la caméra…');
-
-  try {
-    // On demande d'abord explicitement la caméra.
-    // Cela fonctionne mieux sur iPhone/Safari que de laisser ZXing
-    // créer directement le flux vidéo.
-    stream = await navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
-        facingMode: { ideal: 'environment' },
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
-      }
-    });
-
-    video.srcObject = stream;
-    video.setAttribute('playsinline', '');
-    video.muted = true;
-
-    await video.play();
-
-    const readerInstance = new ZXingBrowser.BrowserMultiFormatReader();
-    reader = readerInstance;
-
-    controls = await reader.decodeFromStream(
-      stream,
-      video,
-      (result, err) => {
-        if (result && !locked) {
-          const text = result.getText();
-          const fmt = result.getBarcodeFormat?.();
-          let type = 'BARCODE';
-          if (String(fmt).toUpperCase().includes('QR')) type = 'QR';
-          send(text, type);
-        }
-      }
-    );
-
-    setStatus('🟢 Caméra active — cadre l’IMEI, le code-barres ou le QR code.');
-  } catch (e) {
-    console.error(e);
-    stop(false);
-
-    let msg = '❌ Impossible d’ouvrir la caméra.';
-
-    if (e && e.name === 'NotAllowedError') {
-      msg = '❌ Accès caméra refusé. Autorise la caméra pour ce site dans les réglages de Safari.';
-    } else if (e && e.name === 'NotFoundError') {
-      msg = '❌ Aucune caméra disponible.';
-    } else if (e && e.name === 'NotReadableError') {
-      msg = '❌ La caméra est déjà utilisée par une autre application.';
-    } else if (e && e.name === 'SecurityError') {
-      msg = '❌ Accès caméra bloqué par la sécurité du navigateur. Vérifie que la page est en HTTPS.';
-    }
-
-    setStatus(msg, 'err');
-  }
-}
-
-function stop(showStatus=true) {
-  try { if (controls && controls.stop) controls.stop(); } catch(e) {}
-  controls = null;
-
-  if (stream) {
-    stream.getTracks().forEach(track => {
-      try { track.stop(); } catch(e) {}
-    });
-  }
-
-  stream = null;
-  video.srcObject = null;
-
-  if (showStatus) setStatus('⏹ Caméra arrêtée.');
-}
-
-document.getElementById('start').onclick = start;
-document.getElementById('stop').onclick = () => {
-  locked = false;
-  stop(true);
+const tg=window.Telegram?.WebApp;
+if(tg){tg.ready();tg.expand();}
+const params=new URLSearchParams(window.location.search);
+const flowMode=params.get('mode')==='flow';
+const flowSection=params.get('section')||'';
+const flowField=params.get('field')||'';
+const fieldLabels={
+  numero:'numéro', commande:'numéro de commande', reference:'référence', suivi:'numéro de suivi',
+  imei:'IMEI', etiquette:'numéro d’étiquette hologramme'
 };
+const contextBox=document.getElementById('context');
+const stockRef=document.getElementById('stockRef');
+const status=document.getElementById('status');
+if(flowMode&&flowField){
+  stockRef.hidden=true;
+  contextBox.hidden=false;
+  contextBox.textContent='📷 Scan direct — '+(fieldLabels[flowField]||'champ en cours');
+}
+let controls=null,locked=false;
+function setStatus(t,c=''){status.textContent=t;status.className=c;}
+function send(value,type){
+  if(locked)return;
+  value=String(value||'').trim();
+  if(!value){setStatus('❌ Scan vide.','err');return;}
+  if(!flowMode){
+    const reference=document.getElementById('ref').value.trim();
+    if(!reference){setStatus('❌ Entre la référence stock avant de scanner.','err');return;}
+  }
+  locked=true;
+  setStatus('✅ Code détecté : '+value,'ok');
+  if(tg&&tg.sendData){
+    const data=flowMode
+      ? {value,type,field:flowField,section:flowSection}
+      : {reference:document.getElementById('ref').value.trim(),value,type};
+    tg.sendData(JSON.stringify(data));
+    setTimeout(()=>tg.close(),350);
+  }else{
+    setStatus('⚠️ Ouvre cette page depuis le bot Telegram.','err');
+    locked=false;
+  }
+}
+async function start(){
+  if(!flowMode){
+    const ref=document.getElementById('ref').value.trim();
+    if(!ref){setStatus('❌ Entre d’abord la référence stock.','err');return;}
+  }
+  if(!window.ZXingBrowser){setStatus('❌ Lecteur caméra indisponible.','err');return;}
+  locked=false;setStatus('📷 Demande d’accès à la caméra…');
+  try{
+    const reader=new ZXingBrowser.BrowserMultiFormatReader();
+    controls=await reader.decodeFromConstraints({video:{facingMode:{ideal:'environment'}}},'reader',(result,err)=>{
+      if(result){
+        const text=result.getText();
+        const fmt=result.getBarcodeFormat?.();
+        let type='BARCODE';
+        if(String(fmt).toUpperCase().includes('QR'))type='QR';
+        send(text,type);
+      }
+    });
+    setStatus('🟢 Caméra active — cadre le code, l’IMEI, le QR ou le numéro à scanner.');
+  }catch(e){
+    console.error(e);
+    setStatus('❌ Impossible d’ouvrir la caméra. Vérifie l’autorisation caméra et que la page est en HTTPS.','err');
+  }
+}
+function stop(){try{if(controls)controls.stop();}catch(e){}controls=null;setStatus('⏹ Caméra arrêtée.');}
+document.getElementById('start').onclick=start;
+document.getElementById('stop').onclick=stop;
 </script>
 </body>
 </html>
