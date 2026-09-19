@@ -3,613 +3,304 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-
 <title>AtelierBot — Scanner</title>
-
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="https://unpkg.com/@zxing/browser@0.1.5/umd/zxing-browser.min.js"></script>
-
 <style>
-body{
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:#111827;
-  color:#fff;
-  margin:0;
-  padding:18px
-}
-
-.box{
-  max-width:520px;
-  margin:auto
-}
-
-h1{
-  font-size:24px
-}
-
-label{
-  display:block;
-  margin:16px 0 7px
-}
-
-input,button{
-  width:100%;
-  box-sizing:border-box;
-  border:0;
-  border-radius:14px;
-  padding:15px;
-  font-size:17px
-}
-
-input{
-  background:#263244;
-  color:#fff
-}
-
-button{
-  margin-top:12px;
-  background:#2ea6ff;
-  color:#fff;
-  font-weight:700
-}
-
-button.secondary{
-  background:#374151
-}
-
-#reader{
-  margin-top:18px;
-  border-radius:16px;
-  overflow:hidden;
-  background:#000;
-  min-height:280px
-}
-
-#status{
-  margin-top:14px;
-  padding:12px;
-  border-radius:12px;
-  background:#1f2937
-}
-
-.ok{
-  background:#064e3b!important
-}
-
-.err{
-  background:#7f1d1d!important
-}
-
-small{
-  opacity:.75
-}
-
-.context{
-  background:#1f2937;
-  border-radius:12px;
-  padding:12px;
-  margin-top:14px
-}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#111827;color:#fff;margin:0;padding:18px}.box{max-width:520px;margin:auto}h1{font-size:24px}label{display:block;margin:16px 0 7px}input,button{width:100%;box-sizing:border-box;border:0;border-radius:14px;padding:15px;font-size:17px}input{background:#263244;color:#fff}button{margin-top:12px;background:#2ea6ff;color:#fff;font-weight:700}button.secondary{background:#374151}#reader{margin-top:18px;border-radius:16px;overflow:hidden;background:#000;min-height:280px}#reader video{width:100%;height:auto;display:block;object-fit:cover}#status{margin-top:14px;padding:12px;border-radius:12px;background:#1f2937}.ok{background:#064e3b!important}.err{background:#7f1d1d!important}small{opacity:.75}.context{background:#1f2937;border-radius:12px;padding:12px;margin-top:14px}
 </style>
 </head>
-
 <body>
-
 <div class="box">
-
 <h1>📷 Scanner</h1>
-
-<small>
-La caméra de ton téléphone est utilisée directement dans Telegram.
-</small>
-
+<small>La caméra de ton téléphone est utilisée directement dans Telegram.</small>
 <div id="context" class="context" hidden></div>
-
-<!-- Référence uniquement pour le mode inventaire -->
 <div id="stockRef">
-
 <label for="ref">Référence stock</label>
-
-<input
-  id="ref"
-  placeholder="Ex. IP15PRO-BLK-256"
-  autocomplete="off"
->
-
+<input id="ref" placeholder="Ex. IP15PRO-BLK-256" autocomplete="off">
 </div>
-
-<button id="start">
-📷 Démarrer la caméra
-</button>
-
+<button id="start">📷 Démarrer la caméra</button>
 <div id="reader"></div>
-
-<div id="status">
-Prêt à scanner.
+<div id="fallback" hidden>
+  <button id="nativeQr" type="button">🔳 Scanner QR avec Telegram</button>
+  <label for="photoInput" style="display:block;margin-top:12px">
+    <span style="display:block;background:#374151;border-radius:14px;padding:15px;text-align:center;font-weight:700;cursor:pointer">
+      📸 Photographier / choisir un code-barres
+    </span>
+  </label>
+  <input id="photoInput" type="file" accept="image/*" capture="environment" hidden>
 </div>
-
-<button id="stop" class="secondary">
-⏹ Arrêter
-</button>
-
+<div id="status">Prêt à scanner.</div>
+<button id="stop" class="secondary">⏹ Arrêter</button>
 </div>
-
 <script>
-
 const tg = window.Telegram?.WebApp;
-
-if(tg){
-  tg.ready();
-  tg.expand();
-}
-
-/* =========================
-   PARAMÈTRES
-========================= */
+if (tg) { tg.ready(); tg.expand(); }
 
 const params = new URLSearchParams(window.location.search);
-
-let flowMode = params.get('mode') === 'flow';
-
-const flowSection =
-  (params.get('section') || '').toLowerCase();
-
-let flowField =
-  (params.get('field') || '').toLowerCase();
-
-
-/* =========================
-   CHAMPS CONNUS
-========================= */
+const flowMode = params.get('mode') === 'flow';
+const flowSection = params.get('section') || '';
+const flowField = params.get('field') || '';
 
 const fieldLabels = {
-
-  numero:
-    'numéro',
-
-  commande:
-    'numéro de commande',
-
-  reference:
-    'référence',
-
-  suivi:
-    'numéro de suivi',
-
-  imei:
-    'IMEI',
-
-  etiquette:
-    'numéro d’étiquette hologramme',
-
-  colis:
-    'numéro de colis',
-
-  serial:
-    'numéro de série'
-
+  numero:'numéro',
+  commande:'numéro de commande',
+  reference:'référence',
+  suivi:'numéro de suivi',
+  imei:'IMEI',
+  etiquette:'numéro d’étiquette hologramme'
 };
 
+const contextBox = document.getElementById('context');
+const stockRef = document.getElementById('stockRef');
+const status = document.getElementById('status');
+const readerBox = document.getElementById('reader');
 
-/* =========================
-   SECTIONS
-========================= */
-
-const sectionDefaults = {
-
-  livraison: 'commande',
-
-  livraisons: 'commande',
-
-  livraison_colis: 'commande',
-
-  reparation: 'imei',
-
-  réparations: 'imei',
-
-  debloquage: 'imei',
-
-  déblocage: 'imei',
-
-  debloquages: 'imei',
-
-  commande: 'reference',
-
-  commandes: 'reference'
-
-};
-
-
-/*
- Si le bot indique une section mais
- oublie le champ, on choisit automatiquement
- le champ correspondant.
-*/
-
-if(!flowField && sectionDefaults[flowSection]){
-
-  flowField =
-    sectionDefaults[flowSection];
-
-}
-
-
-/*
- Dès qu'un parcours est identifié,
- on passe automatiquement en mode flow.
-*/
-
-if(
-  flowField ||
-  flowSection
-){
-
-  flowMode = true;
-
-}
-
-
-/* =========================
-   INTERFACE
-========================= */
-
-const contextBox =
-  document.getElementById('context');
-
-const stockRef =
-  document.getElementById('stockRef');
-
-const status =
-  document.getElementById('status');
-
-
-/*
- Mode formulaire :
- aucune référence stock demandée.
-*/
-
-if(flowMode){
-
+if (flowMode && flowField) {
   stockRef.hidden = true;
-
   contextBox.hidden = false;
-
-  const label =
-    fieldLabels[flowField] ||
-    'champ en cours';
-
-  contextBox.textContent =
-    '📷 Scan direct — ' + label;
-
+  contextBox.textContent = '📷 Scan direct — ' + (fieldLabels[flowField] || 'champ en cours');
 }
-
-
-/* =========================
-   VARIABLES
-========================= */
 
 let controls = null;
-
+let stream = null;
 let locked = false;
+let qrNativeOpen = false;
 
-
-/* =========================
-   STATUS
-========================= */
-
-function setStatus(text, className=''){
-
+function setStatus(text, cls='') {
   status.textContent = text;
-
-  status.className = className;
-
+  status.className = cls;
 }
 
+function getReference() {
+  return document.getElementById('ref').value.trim();
+}
 
-/* =========================
-   ENVOI TELEGRAM
-========================= */
+function send(value, type='BARCODE') {
+  if (locked) return;
 
-function send(value,type){
-
-  if(locked)
+  value = String(value || '').trim();
+  if (!value) {
+    setStatus('❌ Scan vide.', 'err');
     return;
-
-  value =
-    String(value || '').trim();
-
-  if(!value){
-
-    setStatus(
-      '❌ Scan vide.',
-      'err'
-    );
-
-    return;
-
   }
 
-
-  /*
-   Mode inventaire :
-   la référence stock reste obligatoire.
-  */
-
-  if(!flowMode){
-
-    const reference =
-      document
-        .getElementById('ref')
-        .value
-        .trim();
-
-    if(!reference){
-
-      setStatus(
-        '❌ Entre la référence stock avant de scanner.',
-        'err'
-      );
-
-      return;
-
-    }
-
+  if (!flowMode && !getReference()) {
+    setStatus('❌ Entre la référence stock avant de scanner.', 'err');
+    return;
   }
-
 
   locked = true;
-
-
-  setStatus(
-    '✅ Code détecté : ' + value,
-    'ok'
-  );
-
-
-  if(tg && tg.sendData){
-
-    let data;
-
-
-    /*
-     MODE FORMULAIRE
-    */
-
-    if(flowMode){
-
-      data = {
-
-        value: value,
-
-        type: type,
-
-        field: flowField,
-
-        section: flowSection
-
-      };
-
-    }
-
-
-    /*
-     MODE INVENTAIRE
-    */
-
-    else{
-
-      data = {
-
-        reference:
-          document
-            .getElementById('ref')
-            .value
-            .trim(),
-
-        value: value,
-
-        type: type
-
-      };
-
-    }
-
-
-    tg.sendData(
-      JSON.stringify(data)
-    );
-
-
-    /*
-     Petite pause pour laisser Telegram
-     récupérer sendData avant fermeture.
-    */
-
-    setTimeout(
-      () => tg.close(),
-      350
-    );
-
+  stopCamera(false);
+  if (tg?.closeScanQrPopup && qrNativeOpen) {
+    try { tg.closeScanQrPopup(); } catch(e) {}
+    qrNativeOpen = false;
   }
 
-  else{
+  setStatus('✅ Code détecté : ' + value, 'ok');
 
-    setStatus(
-      '⚠️ Ouvre cette page depuis le bot Telegram.',
-      'err'
-    );
+  if (tg?.sendData) {
+    const data = flowMode
+      ? { value, type, field: flowField, section: flowSection }
+      : { reference: getReference(), value, type };
 
+    tg.sendData(JSON.stringify(data));
+    setTimeout(() => { try { tg.close(); } catch(e) {} }, 350);
+  } else {
+    setStatus('⚠️ Ouvre cette page depuis le bot Telegram.', 'err');
     locked = false;
-
   }
-
 }
 
+/* ---------------- NATIVE TELEGRAM QR ----------------
+   Sur iPhone, Telegram peut empêcher l'affichage du flux
+   getUserMedia dans son WebView. Pour les QR, on utilise
+   directement le scanner natif de Telegram.
+------------------------------------------------------ */
+function nativeQrAvailable() {
+  return !!(tg && typeof tg.showScanQrPopup === 'function');
+}
 
-/* =========================
-   CAMERA
-========================= */
-
-async function start(){
-
-  /*
-   En mode formulaire :
-   aucune référence stock nécessaire.
-  */
-
-  if(!flowMode){
-
-    const ref =
-      document
-        .getElementById('ref')
-        .value
-        .trim();
-
-    if(!ref){
-
-      setStatus(
-        '❌ Entre d’abord la référence stock.',
-        'err'
-      );
-
-      return;
-
-    }
-
-  }
-
-
-  if(!window.ZXingBrowser){
-
-    setStatus(
-      '❌ Lecteur caméra indisponible.',
-      'err'
-    );
-
+function startNativeQr() {
+  if (!nativeQrAvailable()) {
+    setStatus('ℹ️ Scanner QR natif non disponible sur ce client.', 'err');
     return;
-
   }
-
 
   locked = false;
+  qrNativeOpen = true;
+  setStatus('🔳 Ouverture du scanner QR Telegram…');
 
-  setStatus(
-    '📷 Demande d’accès à la caméra…'
-  );
-
-
-  try{
-
-    const reader =
-      new ZXingBrowser
-        .BrowserMultiFormatReader();
-
-
-    controls =
-      await reader.decodeFromConstraints(
-
-        {
-          video:{
-            facingMode:{
-              ideal:'environment'
-            }
-          }
-        },
-
-        'reader',
-
-        (result,err)=>{
-
-          if(result){
-
-            const text =
-              result.getText();
-
-            const fmt =
-              result.getBarcodeFormat?.();
-
-
-            let type =
-              'BARCODE';
-
-
-            if(
-              String(fmt)
-                .toUpperCase()
-                .includes('QR')
-            ){
-
-              type = 'QR';
-
-            }
-
-
-            send(
-              text,
-              type
-            );
-
-          }
-
+  try {
+    tg.showScanQrPopup(
+      { text: 'Cadre le QR code à scanner' },
+      function(text) {
+        if (text) {
+          send(text, 'QR');
+          return true;
         }
-
-      );
-
-
-    setStatus(
-      '🟢 Caméra active — cadre le code, l’IMEI, le QR ou le numéro à scanner.'
+        return false;
+      }
     );
-
-
-  }catch(e){
-
-    console.error(e);
-
-    setStatus(
-      '❌ Impossible d’ouvrir la caméra. Vérifie l’autorisation caméra et que la page est en HTTPS.',
-      'err'
-    );
-
+  } catch (e) {
+    console.error('Telegram QR error:', e);
+    qrNativeOpen = false;
+    setStatus('❌ Impossible d’ouvrir le scanner QR Telegram.', 'err');
   }
-
 }
 
+if (tg?.onEvent) {
+  tg.onEvent('qrTextReceived', function(event) {
+    const text = event?.data || '';
+    if (text) send(text, 'QR');
+  });
 
-/* =========================
-   STOP
-========================= */
+  tg.onEvent('scanQrPopupClosed', function() {
+    qrNativeOpen = false;
+  });
+}
 
-function stop(){
+/* ---------------- LIVE CAMERA ---------------- */
 
-  try{
-
-    if(controls)
-      controls.stop();
-
-  }catch(e){}
+function stopCamera(showMessage=true) {
+  try {
+    if (controls) controls.stop();
+  } catch(e) {}
 
   controls = null;
 
-  setStatus(
-    '⏹ Caméra arrêtée.'
-  );
+  if (stream) {
+    stream.getTracks().forEach(track => {
+      try { track.stop(); } catch(e) {}
+    });
+    stream = null;
+  }
 
+  const video = readerBox.querySelector('video');
+  if (video) {
+    try { video.pause(); } catch(e) {}
+    video.srcObject = null;
+  }
+
+  if (showMessage) setStatus('⏹ Caméra arrêtée.');
 }
 
+async function startLiveCamera() {
+  if (!flowMode && !getReference()) {
+    setStatus('❌ Entre d’abord la référence stock.', 'err');
+    return;
+  }
 
-/* =========================
-   BOUTONS
-========================= */
+  if (!window.ZXingBrowser) {
+    setStatus('❌ Lecteur de codes indisponible. Recharge la page.', 'err');
+    return;
+  }
 
-document
-  .getElementById('start')
-  .onclick = start;
+  if (!window.isSecureContext) {
+    setStatus('❌ Cette page doit être ouverte en HTTPS.', 'err');
+    return;
+  }
 
-document
-  .getElementById('stop')
-  .onclick = stop;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showFallback('La caméra directe n’est pas disponible dans ce navigateur.');
+    return;
+  }
 
+  locked = false;
+  setStatus('📷 Demande d’accès à la caméra…');
+
+  try {
+    // Demande explicite : plus fiable que de laisser ZXing
+    // négocier lui-même le flux dans certains WebView.
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      }
+    });
+
+    readerBox.innerHTML = '<video id="cameraVideo" autoplay playsinline muted></video>';
+    const video = document.getElementById('cameraVideo');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('webkit-playsinline', '');
+    video.muted = true;
+    video.autoplay = true;
+    video.srcObject = stream;
+
+    await video.play();
+
+    const reader = new ZXingBrowser.BrowserMultiFormatReader();
+
+    controls = await reader.decodeFromVideoElement(
+      video,
+      (result, err) => {
+        if (result) {
+          const text = result.getText();
+          const fmt = result.getBarcodeFormat?.();
+          const type = String(fmt).toUpperCase().includes('QR') ? 'QR' : 'BARCODE';
+          send(text, type);
+        }
+      }
+    );
+
+    setStatus('🟢 Caméra active — cadre l’IMEI ou le code-barres.');
+  } catch (e) {
+    console.error('Camera error:', e);
+
+    stopCamera(false);
+
+    // Sur iOS Telegram, le WebView peut refuser/noircir getUserMedia.
+    // On ne laisse donc pas l'utilisateur bloqué sur une erreur rouge.
+    showFallback(
+      'Telegram/iPhone ne permet pas toujours le flux caméra direct dans le Mini App. Utilise le scanner QR natif ou prends une photo du code.'
+    );
+  }
+}
+
+/* ---------------- PHOTO FALLBACK ---------------- */
+
+function showFallback(message) {
+  setStatus('⚠️ ' + message, '');
+
+  document.getElementById('fallback').hidden = false;
+}
+
+async function decodePhoto(file) {
+  if (!file || !window.ZXingBrowser) return;
+
+  setStatus('🔎 Analyse de la photo…');
+
+  try {
+    const url = URL.createObjectURL(file);
+    const reader = new ZXingBrowser.BrowserMultiFormatReader();
+    const result = await reader.decodeFromImageUrl(url);
+    URL.revokeObjectURL(url);
+
+    if (result) {
+      const text = result.getText();
+      const fmt = result.getBarcodeFormat?.();
+      const type = String(fmt).toUpperCase().includes('QR') ? 'QR' : 'BARCODE';
+      send(text, type);
+      return;
+    }
+
+    setStatus('❌ Aucun code détecté dans la photo.', 'err');
+  } catch (e) {
+    console.error('Photo decode error:', e);
+    setStatus('❌ Impossible de lire le code sur cette photo. Reprends une photo nette et rapprochée.', 'err');
+  }
+}
+
+document.getElementById('start').onclick = startLiveCamera;
+document.getElementById('stop').onclick = () => stopCamera(true);
+document.getElementById('nativeQr').onclick = startNativeQr;
+document.getElementById('photoInput').onchange = (e) => {
+  const file = e.target.files?.[0];
+  decodePhoto(file);
+  e.target.value = '';
+};
 </script>
-
 </body>
 </html>
